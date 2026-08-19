@@ -1,0 +1,6 @@
+{
+  "name": "Markets Financial Dashboard",
+  "description": "Real-time global markets terminal with live stock tickers, indices, interactive charts, and community trends.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
