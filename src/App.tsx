@@ -3,11 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
+import { TickerTape } from './components/TickerTape';
 import { HeroSection } from './components/HeroSection';
 import { NavPillTabs } from './components/NavPillTabs';
+import { MarketBarometer } from './components/MarketBarometer';
+import { MarketHeatmap } from './components/MarketHeatmap';
 import { IndicesCards } from './components/IndicesCards';
 import { StocksTable } from './components/StocksTable';
 import { CommunityTrends } from './components/CommunityTrends';
@@ -38,11 +41,16 @@ export default function App() {
   const [activeCategory, setActiveCategory] = useState<AssetCategory>('us-stocks');
   const [selectedRegion, setSelectedRegion] = useState<string>('everywhere');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'heatmap'>('table');
 
   // Live Market Data States
   const [indices, setIndices] = useState<MarketIndex[]>(INITIAL_INDICES);
   const [stocks, setStocks] = useState<StockItem[]>(MOCK_STOCKS);
   const [communityTrends, setCommunityTrends] = useState<CommunityTrend[]>(COMMUNITY_TRENDS);
+
+  // Pro Terminal States
+  const [tickRate, setTickRate] = useState<number>(4000); // 4s default
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
   // Modals & Interactive Overlays
   const [searchModalOpen, setSearchModalOpen] = useState(false);
@@ -63,6 +71,33 @@ export default function App() {
     { id: '2', symbol: 'AAPL', type: 'BUY', shares: 40, price: 172.50, timestamp: 'Yesterday 02:45 PM', total: 6900.00 }
   ]);
 
+  // Audio synthesis helper for trading desk sounds
+  const playTradeChime = (type: 'BUY' | 'SELL') => {
+    if (!soundEnabled || typeof window === 'undefined') return;
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'BUY') {
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5
+      } else {
+        osc.frequency.setValueAtTime(783.99, ctx.currentTime); // G5
+        osc.frequency.exponentialRampToValueAtTime(523.25, ctx.currentTime + 0.15); // C5
+      }
+
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.22);
+    } catch (e) {
+      // AudioContext policy fallback
+    }
+  };
+
   // Global Keyboard Shortcuts (Ctrl+K / Cmd+K to open search)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -77,11 +112,13 @@ export default function App() {
 
   // Periodic subtle price fluctuation simulation for live market feel
   useEffect(() => {
+    if (tickRate === 0) return; // Paused
+
     const interval = setInterval(() => {
       setStocks((prevStocks) =>
         prevStocks.map((stock) => {
-          // 30% chance each cycle to slightly fluctuate price
-          if (Math.random() > 0.4) return stock;
+          // 40% chance each cycle to slightly fluctuate price
+          if (Math.random() > 0.45) return stock;
           const delta = (Math.random() - 0.49) * (stock.price * 0.002);
           const newPrice = Math.max(0.1, Number((stock.price + delta).toFixed(2)));
           return {
@@ -102,10 +139,10 @@ export default function App() {
           return pos;
         })
       );
-    }, 4000);
+    }, tickRate);
 
     return () => clearInterval(interval);
-  }, [stocks]);
+  }, [stocks, tickRate]);
 
   // Handle Paper Trade Execution
   const handleExecuteTrade = (
@@ -116,6 +153,7 @@ export default function App() {
     price: number
   ) => {
     const totalAmount = shares * price;
+    playTradeChime(type);
 
     if (type === 'BUY') {
       setUserBalance((prev) => prev - totalAmount);
@@ -207,7 +245,7 @@ export default function App() {
   };
 
   return (
-    <div className="bg-[#0f131e] font-sans text-[#dfe2f2] min-h-screen flex">
+    <div className="bg-[#0f131e] font-sans text-[#dfe2f2] min-h-screen flex selection:bg-[#2962ff] selection:text-white">
       {/* 1. Left Fixed Sidebar */}
       <Sidebar
         activeTab={activeSidebarTab}
@@ -226,10 +264,19 @@ export default function App() {
           onOpenCommunity={() => setCommunityModalOpen(true)}
           onToggleMobileSidebar={() => setMobileSidebarOpen(true)}
           onGetStarted={() => setAccountModalOpen(true)}
+          viewMode={viewMode}
+          onToggleViewMode={setViewMode}
         />
 
         {/* Main Dashboard Canvas */}
         <main className="pt-16 pb-20 bg-[#0f131e] min-h-screen flex flex-col">
+          {/* Real-time Ticker Tape Bar */}
+          <TickerTape
+            indices={indices}
+            stocks={stocks}
+            onSelectAsset={(asset) => setSelectedAsset(asset)}
+          />
+
           {/* Hero Section */}
           <HeroSection
             onOpenSearch={() => setSearchModalOpen(true)}
@@ -251,60 +298,76 @@ export default function App() {
           />
 
           {/* Main Dashboard Content Layout */}
-          <div className="p-4 sm:p-6 lg:p-8 space-y-12 sm:space-y-16 max-w-7xl mx-auto w-full">
-            {/* Section 1: Indices */}
+          <div className="p-4 sm:p-6 lg:p-8 space-y-8 sm:space-y-12 max-w-7xl mx-auto w-full">
+            {/* Pro Market Barometer & Breadth Bar */}
+            <MarketBarometer
+              tickRate={tickRate}
+              onSetTickRate={setTickRate}
+              soundEnabled={soundEnabled}
+              onToggleSound={() => setSoundEnabled(!soundEnabled)}
+            />
+
+            {/* Section 1: Indices Benchmark Cards */}
             <IndicesCards
               indices={indices}
               onSelectIndex={(idx) => setSelectedAsset(idx)}
               onSelectSecondary={(name) => {
-                // Find or display matching index
                 const found = indices.find((i) => i.name.toLowerCase().includes(name.toLowerCase()));
                 if (found) setSelectedAsset(found);
                 else setSelectedAsset(indices[0]);
               }}
             />
 
-            {/* Section 2: US Stocks / Active Category Section */}
-            <section className="space-y-8">
-              <div className="flex items-center justify-between border-b border-[#2A2E39] pb-4">
-                <h2 
-                  id="category-stocks-heading"
-                  onClick={() => setSearchModalOpen(true)}
-                  className="font-headline text-2xl sm:text-3xl font-bold text-[#dfe2f2] flex items-center gap-2 group cursor-pointer hover:text-white transition-colors"
-                >
-                  <span className="capitalize">
-                    {activeCategory.replace('-', ' ')}
-                  </span>
-                  <span className="text-[#c3c5d8] group-hover:translate-x-1 transition-transform">
-                    ›
-                  </span>
-                </h2>
-              </div>
-
-              {/* Split 2/3 and 1/3 Grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                {/* Highest Volume / Active Stocks Panel */}
-                <div className="col-span-1 lg:col-span-2">
-                  <StocksTable
-                    stocks={currentCategoryStocks}
-                    onSelectStock={(stk) => setSelectedAsset(stk)}
-                    onSeeAll={() => setSearchModalOpen(true)}
-                    categoryLabel={activeCategory}
-                  />
+            {/* Section 2: US Stocks or Heatmap Mode */}
+            {viewMode === 'heatmap' ? (
+              <MarketHeatmap
+                stocks={stocks}
+                onSelectStock={(stk) => setSelectedAsset(stk)}
+              />
+            ) : (
+              <section className="space-y-8">
+                <div className="flex items-center justify-between border-b border-[#2A2E39] pb-4">
+                  <h2 
+                    id="category-stocks-heading"
+                    onClick={() => setSearchModalOpen(true)}
+                    className="font-headline text-2xl sm:text-3xl font-bold text-[#dfe2f2] flex items-center gap-2 group cursor-pointer hover:text-white transition-colors"
+                  >
+                    <span className="capitalize">
+                      {activeCategory.replace('-', ' ')}
+                    </span>
+                    <span className="text-[#c3c5d8] group-hover:translate-x-1 transition-transform">
+                      ›
+                    </span>
+                  </h2>
                 </div>
 
-                {/* Community Trends Sidebar */}
-                <div className="col-span-1">
-                  <CommunityTrends
-                    trends={communityTrends}
-                    onSelectTrend={(trend) => {
-                      setSelectedTrend(trend);
-                      setCommunityModalOpen(true);
-                    }}
-                  />
+                {/* Split 2/3 and 1/3 Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                  {/* Highest Volume / Active Stocks Panel */}
+                  <div className="col-span-1 lg:col-span-2">
+                    <StocksTable
+                      stocks={currentCategoryStocks}
+                      onSelectStock={(stk) => setSelectedAsset(stk)}
+                      onSeeAll={() => setSearchModalOpen(true)}
+                      categoryLabel={activeCategory}
+                      watchlist={watchlist}
+                      onToggleWatchlist={handleToggleWatchlist}
+                    />
+                  </div>
+
+                  {/* Community Trends Sidebar */}
+                  <div className="col-span-1">
+                    <CommunityTrends
+                      trends={communityTrends}
+                      onSelectTrend={(trend) => {
+                        setSelectedTrend(trend);
+                        setCommunityModalOpen(true);
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
-            </section>
+              </section>
+            )}
           </div>
         </main>
       </div>
